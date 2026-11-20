@@ -36,7 +36,7 @@
   }
   button:disabled { opacity: .5; cursor: not-allowed; }
   .row { display: flex; align-items: center; gap: 14px; margin-top: 16px; flex-wrap: wrap; }
-  #error {
+  #error, #senseError {
     display: none; background: #3a1d22; border: 1px solid var(--bad);
     color: #ffb4ab; padding: 12px 16px; border-radius: 8px; margin-bottom: 16px;
   }
@@ -78,7 +78,42 @@
   td.time-link { color: var(--info); cursor: pointer; text-decoration: underline dotted; }
   .empty { color: var(--muted); }
   .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-  @media (max-width: 820px) { .upload-grid, .two-col { grid-template-columns: 1fr; } }
+  .tabs { display: flex; gap: 6px; padding: 0 28px; border-bottom: 1px solid var(--line); }
+  .tabs button {
+    background: transparent; color: var(--muted); border: 0;
+    border-bottom: 2px solid transparent; border-radius: 0;
+    padding: 10px 16px; font-size: 14px;
+  }
+  .tabs button.active { color: var(--text); border-bottom-color: var(--info); }
+  .tabs button:hover:not(.active) { color: var(--text); }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label { font-weight: 600; }
+  .field .sub { color: var(--muted); font-size: 12px; font-weight: 400; }
+  input[type=text] {
+    width: 100%; padding: 10px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px; font: inherit;
+  }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .recommend {
+    margin-top: 12px; padding: 14px 16px; border-radius: 8px;
+    background: rgba(46,204,113,.10); border: 1px solid var(--ok);
+  }
+  .recommend.none { background: rgba(243,156,18,.10); border-color: var(--warn); }
+  .recommend .big { font-size: 20px; font-weight: 700; color: var(--ok); }
+  .recommend.none .big { color: var(--warn); }
+  .level-table td.reasons { color: var(--muted); font-size: 12px; }
+  .status-pill {
+    display: inline-block; padding: 2px 9px; border-radius: 999px;
+    font-size: 12px; font-weight: 700; white-space: nowrap;
+  }
+  .status-pill.pass { background: rgba(46,204,113,.15); color: var(--ok); }
+  .status-pill.fail { background: rgba(231,76,60,.15); color: var(--bad); }
+  .status-pill.unmeasurable { background: rgba(139,152,169,.18); color: var(--muted); }
+  tr.pass-row td { background: rgba(46,204,113,.05); }
+  .reco-row td { background: rgba(46,204,113,.12); font-weight: 700; }
+  @media (max-width: 820px) {
+    .upload-grid, .two-col, .form-grid { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
@@ -86,7 +121,11 @@
   <h1>冲压机冲次声音核对</h1>
   <p>上传正常循环与待检循环录音（16 kHz / 16-bit PCM / 单声道 WAV，≤ 8 秒），系统按参考节奏自动核对漏冲与多冲。点击波形或表格时刻可定位播放。</p>
 </header>
-<main>
+<nav class="tabs">
+  <button id="tabInspect" class="active" data-tab="inspectView">冲次核对</button>
+  <button id="tabSense" data-tab="senseView">灵敏度试验</button>
+</nav>
+<main id="inspectView">
   <section class="panel">
     <div class="upload-grid">
       <div class="upload-box">
@@ -163,6 +202,104 @@
       </div>
     </div>
     <p class="empty" style="margin-top:14px">说明：每次漏冲只标注对应参考冲次，后续冲次按参考序号继续对齐，不会整体错位；40ms 内回声已在检测阶段剔除，不计多冲。</p>
+  </section>
+</main>
+
+<main id="senseView" style="display:none">
+  <section class="panel">
+    <h3>空转噪声下冲击检出灵敏度</h3>
+    <p class="empty" style="margin-top:-4px">
+      上传空转录音（保持原音量）与不超过 80 ms 的单冲样音；填写样音中冲击的时刻，
+      再填写 3～6 个试验时刻（彼此至少相隔 150 ms，样音片段须完整落在录音内）。
+      系统把样音里的冲击对准各试验时刻叠加，样音增益从 −24 dB 到 0 dB 每 3 dB 试一档。
+    </p>
+    <div class="upload-grid">
+      <div class="upload-box">
+        <label for="idleFile">空转录音（原音量，16 kHz / 16-bit / 单声道 WAV）</label>
+        <input id="idleFile" type="file" accept=".wav,audio/wav" />
+        <div class="hint" id="idleHint"></div>
+      </div>
+      <div class="upload-box">
+        <label for="sampleFile">单冲样音（≤ 80 ms，单次冲击）</label>
+        <input id="sampleFile" type="file" accept=".wav,audio/wav" />
+        <div class="hint" id="sampleHint"></div>
+      </div>
+    </div>
+    <div class="form-grid" style="margin-top:16px">
+      <div class="field">
+        <label for="impactTime">样音中冲击的时刻（秒）
+          <span class="sub">样音内冲击相对样音起点的位置，例如 0.02</span>
+        </label>
+        <input id="impactTime" type="text" inputmode="decimal" placeholder="例如 0.02" />
+      </div>
+      <div class="field">
+        <label for="trialTimes">试验时刻（秒，3～6 个）
+          <span class="sub">逗号或空格分隔，例如 1.0, 2.0, 3.5, 4.8</span>
+        </label>
+        <input id="trialTimes" type="text" inputmode="decimal"
+               placeholder="例如 1.0, 2.0, 3.5, 4.8" />
+      </div>
+    </div>
+    <div class="row">
+      <button id="senseBtn" disabled>开始试验</button>
+      <span id="senseBusy" class="empty" style="display:none">试验中…</span>
+    </div>
+  </section>
+
+  <div id="senseError"></div>
+
+  <section id="senseResult" class="panel" style="display:none">
+    <div class="verdict">
+      <h2 style="margin:0;font-size:17px">试验结论</h2>
+      <span id="senseStatusBadge" class="badge"></span>
+      <div class="stats" id="senseStats"></div>
+    </div>
+    <div id="recommendBox" class="recommend none">
+      <div class="big" id="recommendGain"></div>
+      <div class="empty" id="recommendReason"></div>
+    </div>
+    <ul class="warnings" id="senseWarnings"></ul>
+    <h3 style="margin-top:18px">各增益档结果</h3>
+    <table class="level-table" id="levelTable">
+      <thead>
+        <tr>
+          <th>样音增益 (dB)</th>
+          <th>混音峰值</th>
+          <th>完整混音</th>
+          <th>逐处撤除</th>
+          <th>判定</th>
+          <th>失败原因</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <h3 style="margin-top:18px">试验时刻与检测明细 <span id="trialDetailGain" class="empty"></span></h3>
+    <table id="trialTable">
+      <thead>
+        <tr>
+          <th>试验时刻 (s)</th>
+          <th>完整混音窗口内峰数（要求 1）</th>
+          <th>撤除后窗口内峰数（要求 0）</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <p class="empty" style="margin-top:14px">
+      判定规则：完整混音在每个试验时刻前后 15 ms 内恰好检出 1 个峰且窗外无峰；
+      逐处单独撤掉样音后该窗口内无峰。两条同时满足才通过。混音超出 PCM 量程的档位记为不可测。
+    </p>
+  </section>
+  <section class="panel" id="senseAudioPanel" style="display:none">
+    <div class="two-col">
+      <div>
+        <h3>空转录音</h3>
+        <audio id="idleAudio" controls preload="metadata"></audio>
+      </div>
+      <div>
+        <h3>单冲样音</h3>
+        <audio id="sampleAudio" controls preload="metadata"></audio>
+      </div>
+    </div>
   </section>
 </main>
 
@@ -397,6 +534,175 @@ async function loadPeaks(url, duration, canvasId, audioId, impacts, extraMarkers
     }
   } catch (_) { /* 首次访问无结果，忽略 */ }
 })();
+
+// ================= 灵敏度试验 =================
+const VERDICT_LABEL = { pass: "通过", fail: "未通过", unmeasurable: "不可测" };
+
+function switchTab(tabId) {
+  for (const view of ["inspectView", "senseView"]) {
+    $(view).style.display = view === tabId ? "block" : "none";
+  }
+  document.querySelectorAll(".tabs button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.tab === tabId);
+  });
+}
+document.querySelectorAll(".tabs button").forEach((b) => {
+  b.addEventListener("click", () => switchTab(b.dataset.tab));
+});
+
+function refreshSenseBtn() {
+  $("senseBtn").disabled = !(
+    $("idleFile").files[0] && $("sampleFile").files[0] &&
+    $("impactTime").value.trim() && $("trialTimes").value.trim()
+  );
+}
+["idleFile", "sampleFile"].forEach((id) => {
+  $(id).addEventListener("change", () => {
+    $(id.replace("File", "Hint")).textContent = $(id).files[0]?.name ?? "";
+    refreshSenseBtn();
+  });
+});
+["impactTime", "trialTimes"].forEach((id) => {
+  $(id).addEventListener("input", refreshSenseBtn);
+});
+
+$("senseBtn").addEventListener("click", async () => {
+  const fd = new FormData();
+  fd.append("idle", $("idleFile").files[0]);
+  fd.append("sample", $("sampleFile").files[0]);
+  fd.append("impact_time", $("impactTime").value.trim());
+  fd.append("trial_times", $("trialTimes").value.trim());
+  $("senseError").style.display = "none";
+  $("senseBusy").style.display = "inline";
+  $("senseBtn").disabled = true;
+  try {
+    const resp = await fetch("/api/sensitivity", { method: "POST", body: fd });
+    const payload = await resp.json();
+    if (!resp.ok) {
+      showSenseError(payload.detail || "试验失败");
+      // 输入有误时后端已撤下旧推荐，前端同步刷新记录
+      await loadLastSensitivity();
+      return;
+    }
+    renderSense(payload);
+  } catch (e) {
+    showSenseError("请求失败：" + e.message);
+  } finally {
+    $("senseBusy").style.display = "none";
+    refreshSenseBtn();
+  }
+});
+
+function showSenseError(msg) {
+  const el = $("senseError");
+  el.textContent = "✗ " + msg;
+  el.style.display = "block";
+}
+
+function levelReason(lv) {
+  if (!lv.failure_reasons || !lv.failure_reasons.length) return "—";
+  return lv.failure_reasons.join("；");
+}
+
+function renderSense(r) {
+  $("senseResult").style.display = "block";
+
+  const badge = $("senseStatusBadge");
+  const rec = r.recommendation;
+  const summary = r.summary || {};
+  if (rec) {
+    badge.className = "badge ok";
+    badge.textContent = "✓ 有可用档位";
+  } else if (r.status === "input_error") {
+    badge.className = "badge ambiguous";
+    badge.textContent = "⚠ 输入有误，无推荐";
+  } else {
+    badge.className = "badge defect";
+    badge.textContent = "✗ 无档通过，无推荐";
+  }
+
+  $("senseStats").innerHTML = [
+    ["通过档位", summary.pass_count ?? 0],
+    ["未通过档位", summary.fail_count ?? 0],
+    ["不可测档位", summary.unmeasurable_count ?? 0],
+  ].map(([k, v]) => `<span>${k}：<b>${v}</b></span>`).join("");
+
+  const box = $("recommendBox");
+  box.className = "recommend" + (rec ? "" : " none");
+  if (rec) {
+    $("recommendGain").textContent = `推荐最低通过档：${rec.gain_db > 0 ? "+" : ""}${rec.gain_db} dB`;
+  } else {
+    $("recommendGain").textContent = "无推荐档位";
+  }
+  $("recommendReason").textContent = r.recommendation_reason || "";
+
+  $("senseWarnings").innerHTML = [
+    ...(r.status === "input_error" && r.error ? [r.error] : []),
+    ...(r.warnings || []),
+  ].map((w) => `<li>${w}</li>`).join("");
+
+  const body = $("levelTable").querySelector("tbody");
+  const levels = r.levels || [];
+  body.innerHTML = levels.length
+    ? levels.map((lv) => {
+        const reason = lv.status === "unmeasurable"
+          ? levelReason(lv)
+          : (lv.failure_reasons?.length ? levelReason(lv) : "—");
+        const recRow = rec && lv.gain_db === rec.gain_db;
+        return `<tr class="${recRow ? "reco-row" : ""}">
+          <td>${lv.gain_db > 0 ? "+" : ""}${lv.gain_db}</td>
+          <td>${lv.mixed_peak != null ? lv.mixed_peak.toFixed(4) : "—"}</td>
+          <td>${lv.full_mix ? (lv.full_mix.ok ? "✓ 满足" : "✗ 不满足") : "—"}</td>
+          <td>${lv.leave_one_out ? (lv.leave_one_out.ok ? "✓ 满足" : "✗ 不满足") : "—"}</td>
+          <td><span class="status-pill ${lv.status}">${VERDICT_LABEL[lv.status] || lv.status}${
+            lv.status === "pass" ? " · 推荐" : ""}</span></td>
+          <td class="reasons">${reason}</td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="6" class="empty">本次输入有误，未执行增益扫描</td></tr>`;
+
+  // 试验时刻与检测明细：优先展示推荐档，否则展示第一个完成判定的档位
+  const trialBody = $("trialTable").querySelector("tbody");
+  const measured = (rec && levels.find((lv) => lv.gain_db === rec.gain_db)) ||
+    levels.find((lv) => lv.full_mix && lv.leave_one_out);
+  $("trialDetailGain").textContent = measured
+    ? `（样音增益 ${measured.gain_db > 0 ? "+" : ""}${measured.gain_db} dB）`
+    : "";
+  if (measured) {
+    const rows = measured.full_mix.windows.map((w, i) => {
+      const rem = measured.leave_one_out.removals[i];
+      return `<tr>
+        <td>${w.trial_time.toFixed(3)}</td>
+        <td>${w.peak_count}${w.ok ? " ✓" : " ✗"}</td>
+        <td>${rem ? rem.peak_count : "—"}${rem && rem.ok ? " ✓" : " ✗"}</td>
+      </tr>`;
+    }).join("");
+    trialBody.innerHTML = rows ||
+      `<tr><td colspan="3" class="empty">无试验时刻</td></tr>`;
+  } else {
+    trialBody.innerHTML =
+      `<tr><td colspan="3" class="empty">无可用明细</td></tr>`;
+  }
+
+  const audioPanel = $("senseAudioPanel");
+  if (r.idle_url) {
+    audioPanel.style.display = "block";
+    $("idleAudio").src = r.idle_url + "?t=" + r.id;
+    $("sampleAudio").src = r.sample_url + "?t=" + r.id;
+  } else {
+    audioPanel.style.display = "none";
+  }
+}
+
+async function loadLastSensitivity() {
+  try {
+    const resp = await fetch("/api/sensitivity/last");
+    if (resp.ok) renderSense(await resp.json());
+  } catch (_) { /* 无记录，忽略 */ }
+}
+
+// 进入页面时尝试恢复上一次灵敏度试验记录
+loadLastSensitivity();
 </script>
 </body>
 </html>

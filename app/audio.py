@@ -87,13 +87,14 @@ def _energy_envelope(samples: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         frame_len = len(samples)
         hop = max(1, frame_len)
     n = 1 + (len(samples) - frame_len) // hop
-    energies = np.empty(n, dtype=np.float32)
-    centers = np.empty(n, dtype=np.float32)
-    for k in range(n):
-        start = k * hop
-        frame = samples[start : start + frame_len]
-        energies[k] = float(np.mean(frame * frame))
-        centers[k] = (start + frame_len / 2) / SAMPLE_RATE
+    # 各帧平方和用前缀和一次算出，结果与逐帧 np.mean 相同
+    squared = np.square(samples, dtype=np.float64)
+    prefix = np.concatenate(([0.0], np.cumsum(squared)))
+    starts = np.arange(n) * hop
+    energies = (
+        (prefix[starts + frame_len] - prefix[starts]) / frame_len
+    ).astype(np.float32)
+    centers = ((starts + frame_len / 2) / SAMPLE_RATE).astype(np.float32)
     return centers, energies
 
 
@@ -118,15 +119,20 @@ def detect_impacts(samples: np.ndarray) -> ImpactDetection:
     threshold = max(abs_threshold, PROMINENCE_RATIO * bg)
 
     bg_frames = max(1, int(BACKGROUND_SEC / HOP_SEC))
+    # 局部背景 = 以当前帧为中心、左右各 bg_frames 帧的中位数（边界处用可用帧）
+    padded = np.full(len(energies) + 2 * bg_frames, np.nan, dtype=np.float64)
+    padded[bg_frames : bg_frames + len(energies)] = energies
+    windows = np.lib.stride_tricks.sliding_window_view(
+        padded, 2 * bg_frames + 1
+    )
+    local_bg = np.nanmedian(windows, axis=1)
+
     threshold_frames: list[int] = []
     for i in range(len(energies)):
-        lo = max(0, i - bg_frames)
-        hi = min(len(energies), i + bg_frames + 1)
-        local_bg = float(np.median(energies[lo:hi]))
         e = float(energies[i])
         if e < threshold:
             continue
-        if e < PROMINENCE_RATIO * max(local_bg, 1e-12):
+        if e < PROMINENCE_RATIO * max(float(local_bg[i]), 1e-12):
             continue
         threshold_frames.append(i)
 

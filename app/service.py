@@ -12,11 +12,18 @@ from pathlib import Path
 from typing import Any
 
 from .audio import (
+    AudioValidationError,
     detect_impacts,
     parse_wav,
     validate_reference,
 )
 from .matching import align_impacts
+from .sensitivity import (
+    SensitivityInputError,
+    parse_impact_time,
+    parse_trial_times,
+    run_sensitivity,
+)
 
 MAX_UPLOAD_BYTES = 16_000 * 2 * 8 + 4096  # 8 秒 16k/16bit/单声道 + WAV 头余量
 
@@ -28,6 +35,7 @@ class Store:
         self.uploads_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._last_result: dict[str, Any] | None = None
+        self._last_sensitivity: dict[str, Any] | None = None
 
     def _save_wav(self, raw: bytes, prefix: str) -> str:
         digest = hashlib.sha256(raw).hexdigest()[:16]
@@ -156,3 +164,85 @@ class Store:
     def clear(self) -> None:
         with self._lock:
             self._last_result = None
+
+    # ---------- 灵敏度试验 ----------
+
+    def run_sensitivity(
+        self,
+        idle_raw: bytes,
+        sample_raw: bytes,
+        impact_time_text: str | None,
+        trial_times_text: str | None,
+    ) -> dict[str, Any]:
+        """灵敏度试验。
+
+        输入有误时抛 ``SensitivityInputError``，同时撤下上一次推荐
+        （保存一条说明原因、无推荐的记录），避免网页继续展示旧推荐。
+        """
+        try:
+            return self._run_sensitivity(
+                idle_raw, sample_raw, impact_time_text, trial_times_text
+            )
+        except (SensitivityInputError, AudioValidationError) as exc:
+            self.retract_sensitivity(str(exc))
+            if isinstance(exc, AudioValidationError):
+                raise SensitivityInputError(str(exc)) from exc
+            raise
+
+    def _run_sensitivity(
+        self,
+        idle_raw: bytes,
+        sample_raw: bytes,
+        impact_time_text: str | None,
+        trial_times_text: str | None,
+    ) -> dict[str, Any]:
+        # 先完整解析与校验，全部通过后才写入状态
+        impact_time = parse_impact_time(impact_time_text)
+        trial_times = parse_trial_times(trial_times_text)
+        idle_samples = parse_wav(idle_raw)
+        sample_samples = parse_wav(sample_raw)
+
+        result = run_sensitivity(
+            idle_samples, sample_samples, impact_time, trial_times
+        )
+        result["id"] = datetime.now(timezone.utc).strftime(
+            "%Y%m%dT%H%M%S%fZ"
+        )
+        result["timestamp"] = datetime.now(timezone.utc).isoformat()
+        result["idle_url"] = self._save_wav(idle_raw, "idle")
+        result["sample_url"] = self._save_wav(sample_raw, "sample")
+
+        with self._lock:
+            self._last_sensitivity = result
+        return result
+
+    def retract_sensitivity(self, reason: str) -> None:
+        record = {
+            "id": datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ"),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "status": "input_error",
+            "error": reason,
+            "recommendation": None,
+            "recommendation_reason": (
+                f"本次输入有误，已撤下旧推荐：{reason}"
+            ),
+            "levels": [],
+            "summary": {
+                "pass_count": 0,
+                "fail_count": 0,
+                "unmeasurable_count": 0,
+            },
+            "warnings": [],
+        }
+        with self._lock:
+            self._last_sensitivity = record
+
+    def get_last_sensitivity(self) -> dict[str, Any] | None:
+        with self._lock:
+            if self._last_sensitivity is None:
+                return None
+            return dict(self._last_sensitivity)
+
+    def clear_sensitivity(self) -> None:
+        with self._lock:
+            self._last_sensitivity = None

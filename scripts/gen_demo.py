@@ -1,7 +1,8 @@
 """生成演示用 WAV（16kHz/16bit/单声道），供手工冒烟测试。
 
 用法：python -I scripts/gen_demo.py <输出目录>
-生成参考录音及四种待检录音（正常/漏冲/多冲/歧义）。
+生成参考录音及四种待检录音（正常/漏冲/多冲/歧义），
+以及灵敏度试验用的空转录音 idle.wav 与单冲样音 sample.wav。
 """
 from __future__ import annotations
 
@@ -43,6 +44,26 @@ def save(path, samples):
         wf.writeframes((samples * 32767).astype("<i2").tobytes())
 
 
+def idle_noise(duration=5.0, noise=0.01, seed=21):
+    """空转噪声：宽带底噪（保持原音量，不做任何增益调整）。"""
+    rng = np.random.default_rng(seed)
+    return (rng.standard_normal(int(duration * SR)) * noise).astype(np.float32)
+
+
+def single_impact_sample(impact_time=0.02, duration=0.06, gain=0.8, seed=22):
+    """单冲样音：冲击位于 impact_time，样音总长不超过 80ms。"""
+    rng = np.random.default_rng(seed)
+    n = int(duration * SR)
+    x = np.zeros(n, dtype=np.float32)
+    start = int(impact_time * SR)
+    burst = int(0.012 * SR)
+    decay = np.exp(-np.linspace(0, 5, burst)).astype(np.float32)
+    x[start : start + burst] = (
+        gain * rng.standard_normal(burst).astype(np.float32) * decay
+    )
+    return x
+
+
 def main(out_dir: str) -> None:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -55,7 +76,11 @@ def main(out_dir: str) -> None:
         synth([0.6, 1.1, 1.35, 1.6, 2.1, 2.6], 3.2, echoes={0.6: 0.035}),
     )
     save(out / "test_ambiguous.wav", synth([0.6, 1.1, 1.6, 2.1, 2.6, 3.1], 3.7))
+    # 灵敏度试验：样音冲击位于 20ms，建议试验时刻 1.0/2.0/3.0/4.0s
+    save(out / "idle.wav", idle_noise())
+    save(out / "sample.wav", single_impact_sample())
     print("written to", out)
+    print("灵敏度试验示例：样音冲击时刻 0.02，试验时刻 1.0,2.0,3.0,4.0")
 
 
 if __name__ == "__main__":
